@@ -7,8 +7,10 @@
 #include <libnotify/notification.h>
 #include <sys/stat.h>
 #include <sys/file.h>
+#include <sys/prctl.h>
 #include <regex.h>
 #include <string.h>
+#include <pthread.h>
 
 static const char *msgsrc = "/var/log/messages";
 static const char *pid = "/tmp/.msg-watch.pid";
@@ -69,6 +71,17 @@ reopen:
 }
 
 static void
+die_on_parent_exit()
+{
+	/* set on-death signal */
+	prctl(PR_SET_PDEATHSIG, SIGTERM);
+}
+
+static void dummy()
+{
+}
+
+static void
 daemonize()
 {
 	char buf[32];
@@ -76,6 +89,12 @@ daemonize()
 	int fd = open(pid, O_RDWR | O_CREAT, 0644);
 	if (fd == -1) {
 		perror("can't create pid file");
+		exit(EXIT_FAILURE);
+	}
+
+	/* set close-on-exec flag */
+	if (fcntl(fd, F_SETFD, FD_CLOEXEC) != 0) {
+		perror("fcntl(FD_CLOEXEC)");
 		exit(EXIT_FAILURE);
 	}
 
@@ -99,17 +118,20 @@ daemonize()
 		exit(EXIT_FAILURE);
 	}
 
+	/* daemonize */
+	if (daemon(FALSE, FALSE) != 0) {
+		perror("can't daemonize");
+		exit(EXIT_FAILURE);
+	}
+
 	/* write new pid */
 	len = snprintf(buf, sizeof(buf), "%lu", (unsigned long)getpid());
 	if (write(fd, buf, len) != len) {
 		perror("can't write pid file");
-		exit(EXIT_FAILURE);
+		/* don't exit because we've daemonized already */
 	}
 
-	/* daemonize */
-	if (daemon(FALSE, FALSE) != 0) {
-		perror("can't daemonize");
-	}
+	pthread_atfork(dummy, dummy, die_on_parent_exit);
 }
 
 enum {
