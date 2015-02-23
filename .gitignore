@@ -1,0 +1,6 @@
+msg-watch
+tags
+TAGS
+cscope.out
+.*swp
+*.pyc
